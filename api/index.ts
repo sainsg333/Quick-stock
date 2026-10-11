@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { MongoClient, ObjectId, type Db } from 'mongodb';
 import { SignJWT, jwtVerify } from 'jose';
 import { z } from 'zod';
+import { createHash, timingSafeEqual } from 'node:crypto';
 
 const app = express();
 app.disable('x-powered-by');
@@ -44,9 +45,21 @@ const safe = (fn: (req: Request, res: Response, next: NextFunction) => Promise<u
   (req: Request, res: Response, next: NextFunction) => { Promise.resolve(fn(req, res, next)).catch(next); };
 const owner = safe(async (req, res, next) => { if (!(await isAuthenticated(req))) { res.status(401).json({ error: 'Sign in to continue' }); return; } next(); });
 const passwordSchema = z.object({ password: z.string().min(6).max(128) }).strict();
+const setupSchema = z.object({ password: z.string().min(12).max(128), setupToken: z.string().min(24).max(256) }).strict();
+class ClientError extends Error { constructor(message: string, readonly status: number = 422) { super(message); } }
+function verifySetupToken(provided: string): boolean {
+  const expected = process.env.SETUP_TOKEN;
+  if (!expected || expected.length < 24) throw new ClientError('SETUP_TOKEN must be configured with at least 24 characters before initial setup.', 503);
+  const a = createHash('sha256').update(provided).digest();
+  const b = createHash('sha256').update(expected).digest();
+  return timingSafeEqual(a, b);
+}
 const commonTags = z.array(z.string().trim().min(1).max(40)).max(20).default([]);
 const str = (max = 500) => z.string().trim().max(max).default('');
 const maybeNumber = z.number().finite().nullable().default(null);
+const percentage = z.number().finite().min(0).max(100).nullable().default(null);
+const nonnegative = z.number().finite().min(0).nullable().default(null);
+const optionalDate = z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).default('');
 const symbol = z.string().trim().toUpperCase().regex(/^[A-Z0-9&._-]{1,24}$/, 'Enter a valid ticker symbol');
 const schemas = {
   stocks: z.object({
@@ -55,7 +68,7 @@ const schemas = {
     cap: z.enum(['large','mid','small','micro','unknown']).default('unknown'),
     trend: z.enum(['bullish','bearish','sideways','unknown']).default('unknown'),
     status: z.enum(['watch','active','paused','archived']).default('watch'),
-    lastPrice: maybeNumber, changePct: maybeNumber, rvol: maybeNumber, rsi: maybeNumber,
+    lastPrice: nonnegative, changePct: maybeNumber, rvol: nonnegative, rsi: percentage, observedAt: optionalDate,
     notes: str(5000), tags: commonTags
   }).strict(),
   strategies: z.object({
@@ -74,7 +87,7 @@ const schemas = {
     timeframe: str(60), regime: z.enum(['bullish','bearish','sideways','any']).default('any'),
     source: z.enum(['hypothesis','backtest','paper','live']).default('hypothesis'),
     sampleSize: z.number().int().min(0).max(10000000).default(0), outOfSample: z.boolean().default(false),
-    winRate: maybeNumber, avgReturnPct: maybeNumber, maxDrawdownPct: maybeNumber,
+    winRate: percentage, avgReturnPct: maybeNumber, maxDrawdownPct: percentage,
     verdict: z.enum(['untested','working','mixed','failing']).default('untested'),
     notes: str(5000), tags: commonTags
   }).strict(),
@@ -99,7 +112,7 @@ const schemas = {
     symbol: str(24), strategyId: str(100),
     category: z.enum(['discovery','observation','review','failure','lesson']).default('observation'),
     regime: z.enum(['bullish','bearish','sideways','unknown']).default('unknown'),
-    screenshotUrl: z.union([z.literal(''), z.string().url().max(1000)]).default(''),
+    screenshotUrl: z.union([z.literal(''), z.string().url().max(1000).refine(url => /^https?:\/\//i.test(url), 'Use an http or https URL')]).default(''),
     notes: z.string().trim().min(1).max(10000), tags: commonTags
   }).strict()
 } as const;
@@ -108,6 +121,39 @@ const names = Object.keys(schemas) as CollectionName[];
 function collectionName(input: string): input is CollectionName { return names.includes(input as CollectionName); }
 function parseBody(name: CollectionName, body: unknown) { return schemas[name].parse(body); }
 function serialize(doc: Record<string, unknown>) { const { _id, ...rest } = doc; return { ...rest, id: String(_id) }; }
+async function validateLinks(database: Db, name: CollectionName, input: Record<string, unknown>) {
+  if (name === 'matches' || name === 'trades' || (name === 'journal' && input.strategyId)) {
+    const id = String(input.strategyId || '');
+    if (!ObjectId.isValid(id) || !(await database.collection('strategies').findOne({ _id: new ObjectId(id) }, { projection: { _id: 1 } }))) {
+      throw new ClientError('Select an existing strategy before saving. The referenced strategy was not found.');
+    }
+  }
+  if (name === 'matches' || name === 'trades') {
+    const stock = await database.collection('stocks').findOne({ symbol: input.symbol }, { projection: { _id: 1 } });
+    if (!stock) throw new ClientError('Add this ticker to Stock Universe before adding a strategy match or trade result.');
+  }
+}
+async function protectStockIdentity(database: Db, current: Record<string, unknown>) {
+  const ticker = current.symbol;
+  for (const name of ['matches', 'trades', 'journal']) {
+    if (await database.collection(name).findOne({ symbol: ticker }, { projection: { _id: 1 } }))
+      throw new ClientError('This stock is referenced in ' + name + '. Update or remove those records first.', 409);
+  }
+  if (await database.collection('watchlists').findOne({ symbols: ticker }, { projection: { _id: 1 } }))
+    throw new ClientError('This stock is in a watchlist. Remove its ticker from watchlists first.', 409);
+}
+async function guardWrite(database: Db, name: CollectionName, input: Record<string, unknown>, id?: ObjectId) {
+  await validateLinks(database, name, input);
+  if (name !== 'stocks') return;
+  const duplicate = await database.collection('stocks').findOne({
+    symbol: input.symbol, exchange: input.exchange, ...(id ? { _id: { $ne: id } } : {})
+  }, { projection: { _id: 1 } });
+  if (duplicate) throw new ClientError('A stock with this ticker and exchange already exists.', 409);
+  if (id) {
+    const previous = await database.collection('stocks').findOne({ _id: id });
+    if (previous && previous.symbol !== input.symbol) await protectStockIdentity(database, previous);
+  }
+}
 
 app.get('/api/health', (_req, res) => { res.json({ ok: true, service: 'QuickStocks API' }); });
 app.get('/api/auth/status', safe(async (req, res) => {
@@ -116,10 +162,11 @@ app.get('/api/auth/status', safe(async (req, res) => {
   res.json({ configured, authenticated: configured && await isAuthenticated(req) });
 }));
 app.post('/api/auth/setup', safe(async (req, res) => {
-  const body = passwordSchema.parse(req.body);
+  const { password, setupToken } = setupSchema.parse(req.body);
   secret();
+  if (!verifySetupToken(setupToken)) { res.status(403).json({ error: 'Invalid setup token.' }); return; }
   const database = await db();
-  const hash = await bcrypt.hash(body.password, 12);
+  const hash = await bcrypt.hash(password, 12);
   try { await database.collection('users').insertOne({ _id: 'owner' as never, passwordHash: hash, createdAt: new Date(), failedAttempts: 0 }); }
   catch (e) { if ((e as { code?: number }).code === 11000) { res.status(409).json({ error: 'Setup is already complete. Please sign in.' }); return; } throw e; }
   await issueSession(res);
@@ -146,8 +193,15 @@ app.use('/api/data', owner);
 app.get('/api/data/:name', safe(async (req, res) => {
   if (!collectionName(req.params.name)) { res.status(404).json({ error: 'Unknown collection' }); return; }
   const database = await db();
-  const limit = Math.min(Math.max(Number(req.query.limit) || 500, 1), 1000);
-  const page = Math.max(Number(req.query.page) || 1, 1);
+  const parsedLimit = Number(req.query.limit);
+  const parsedPage = Number(req.query.page);
+  if ((req.query.limit !== undefined && (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1)) ||
+      (req.query.page !== undefined && (!Number.isSafeInteger(parsedPage) || parsedPage < 1))) {
+    throw new ClientError('Page and limit must be positive integers.', 400);
+  }
+  const limit = Math.min(req.query.limit === undefined ? 500 : parsedLimit, 1000);
+  const page = req.query.page === undefined ? 1 : parsedPage;
+  if ((page - 1) * limit > 1_000_000) throw new ClientError('Requested page is too deep.', 400);
   const coll = database.collection(req.params.name);
   const [docs, total] = await Promise.all([
     coll.find({}).sort({ updatedAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).toArray(),
@@ -164,24 +218,43 @@ app.get('/api/data/:name/:id', safe(async (req, res) => {
 app.post('/api/data/:name', safe(async (req, res) => {
   if (!collectionName(req.params.name)) { res.status(404).json({ error: 'Unknown collection' }); return; }
   const body = parseBody(req.params.name, req.body);
+  const database = await db();
+  await guardWrite(database, req.params.name, body as Record<string, unknown>);
   const now = new Date();
-  const result = await (await db()).collection(req.params.name).insertOne({ ...body, createdAt: now, updatedAt: now });
+  const result = await database.collection(req.params.name).insertOne({ ...body, createdAt: now, updatedAt: now });
   res.status(201).json({ ...body, id: String(result.insertedId), createdAt: now, updatedAt: now });
 }));
 app.put('/api/data/:name/:id', safe(async (req, res) => {
   if (!collectionName(req.params.name) || !ObjectId.isValid(req.params.id)) { res.status(404).json({ error: 'Not found' }); return; }
   const body = parseBody(req.params.name, req.body);
-  const result = await (await db()).collection(req.params.name).updateOne({ _id: new ObjectId(req.params.id) }, { $set: { ...body, updatedAt: new Date() } });
+  const database = await db();
+  const id = new ObjectId(req.params.id);
+  await guardWrite(database, req.params.name, body as Record<string, unknown>, id);
+  const result = await database.collection(req.params.name).updateOne({ _id: id }, { $set: { ...body, updatedAt: new Date() } });
   if (!result.matchedCount) { res.status(404).json({ error: 'Not found' }); return; }
   res.json({ ok: true });
 }));
 app.delete('/api/data/:name/:id', safe(async (req, res) => {
   if (!collectionName(req.params.name) || !ObjectId.isValid(req.params.id)) { res.status(404).json({ error: 'Not found' }); return; }
-  const result = await (await db()).collection(req.params.name).deleteOne({ _id: new ObjectId(req.params.id) });
+  const database = await db();
+  const id = new ObjectId(req.params.id);
+  if (req.params.name === 'strategies') {
+    for (const related of ['matches', 'trades', 'journal']) {
+      if (await database.collection(related).findOne({ strategyId: req.params.id }, { projection: { _id: 1 } })) {
+        throw new ClientError('This strategy is referenced by ' + related + '. Remove or reassign those records first.', 409);
+      }
+    }
+  }
+  if (req.params.name === 'stocks') {
+    const existing = await database.collection('stocks').findOne({ _id: id });
+    if (existing) await protectStockIdentity(database, existing);
+  }
+  const result = await database.collection(req.params.name).deleteOne({ _id: id });
   if (!result.deletedCount) { res.status(404).json({ error: 'Not found' }); return; }
   res.json({ ok: true });
 }));
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  if (err instanceof ClientError) { res.status(err.status).json({ error: err.message }); return; }
   if (err instanceof z.ZodError) { res.status(400).json({ error: err.issues.map(x => x.path.join('.') + ': ' + x.message).join('; ') }); return; }
   if ((err as { code?: number })?.code === 11000) { res.status(409).json({ error: 'This record already exists' }); return; }
   console.error('QuickStocks API request error', err instanceof Error ? err.message : err);

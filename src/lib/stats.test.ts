@@ -12,5 +12,8 @@ const r=tradeMetrics([{id:'1',date:'2026-01-01',netReturnPct:10},{id:'2',date:'2
 expect(r.count).toBe(2);expect(r.returnPct).toBeCloseTo(-1);expect(r.maxDrawdown).toBeCloseTo(10);expect(r.winRate).toBe(50);
 });
 it('never invents outcomes for empty sets',()=>{expect(tradeMetrics([])).toMatchObject({count:0,winRate:0,returnPct:0});});
+it('ignores absent or null returns rather than counting them as flat trades',()=>{
+ expect(tradeMetrics([{id:'x',date:'2026-01-01',netReturnPct:null},{id:'y',date:'2026-01-02'}]).count).toBe(0);
+});
 it('deduplicates watchlist symbols',()=>{expect(uniqueTickers([{id:'1',symbols:['TCS','INFY']},{id:'2',symbols:['TCS']}])).toBe(2);});
 });

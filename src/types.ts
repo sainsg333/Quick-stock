@@ -15,11 +15,11 @@ const regime=()=>s('regime','Market regime',['any','bullish','bearish','sideways
 const evidence=()=>s('source','Evidence source',['hypothesis','backtest','paper','live']);
 const out:Field={key:'outOfSample',label:'Out-of-sample tested',type:'boolean',wide:true};
 export const config:Record<Kind,Config>={
-stocks:{title:'Stock Universe',singular:'Stock',description:'Stock profiles, recorded indicators and research context.',columns:['symbol','name','sector','trend','changePct','rvol','status'],fields:[
+stocks:{title:'Stock Universe',singular:'Stock',description:'Stock profiles, recorded indicators and research context.',columns:['symbol','name','sector','trend','changePct','rvol','observedAt','status'],fields:[
 sym,{key:'name',label:'Company name',required:true},{key:'sector',label:'Sector'},{key:'industry',label:'Industry'},
 s('exchange','Exchange',['NSE','BSE','OTHER']),s('cap','Market cap',['unknown','large','mid','small','micro']),
 s('trend','Trend',['unknown','bullish','bearish','sideways']),s('status','Status',['watch','active','paused','archived']),
-n('lastPrice','Recorded price (₹)'),n('changePct','Recorded change (%)'),n('rvol','Relative volume (×)'),n('rsi','RSI'),tags,t('notes','Research notes')
+n('lastPrice','Recorded price (₹)'),n('changePct','Recorded change (%)'),n('rvol','Relative volume (×)'),n('rsi','RSI'),{key:'observedAt',label:'Snapshot date (manual)',type:'date',help:'Date the displayed price and indicators were observed.'},tags,t('notes','Research notes')
 ]},
 strategies:{title:'Strategy Library',singular:'Strategy',description:'Playbooks, entry / exit rules, setup behavior and evidence.',columns:['name','style','timeframe','regime','evidence','sampleSize','status'],fields:[
 {key:'name',label:'Strategy name',required:true,wide:true},s('style','Period',['intraday','swing','short-term','long-term']),s('direction','Direction',['long','short','both']),
@@ -42,7 +42,7 @@ date,sym,strat,s('direction','Direction',['long','short']),s('source','Source',[
 s('regime','Regime',['unknown','bullish','bearish','sideways']),n('netReturnPct','Net return (%)',true),
 n('rMultiple','R multiple'),t('notes','Execution and outcome notes')
 ]},
-journal:{title:'Research Journal',singular:'Entry',description:'Capture discoveries, screenshots, observations and lessons.',columns:['date','title','symbol','category','regime','notes'],fields:[
+journal:{title:'Research Journal',singular:'Entry',description:'Capture discoveries, screenshots, observations and lessons.',columns:['date','title','symbol','category','regime','screenshotUrl','notes'],fields:[
 {key:'title',label:'Title',required:true,wide:true},date,{...sym,required:false},{...strat,required:false},
 s('category','Category',['observation','discovery','review','failure','lesson']),
 s('regime','Regime',['unknown','bullish','bearish','sideways']),

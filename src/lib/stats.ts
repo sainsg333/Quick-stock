@@ -9,7 +9,7 @@ export function tradeMetrics(rows:Row[]){
 const t=[...rows].sort((a,b)=>String(a.date||'').localeCompare(String(b.date||''))||String(a.createdAt||'').localeCompare(String(b.createdAt||'')));
 let equity=100,peak=100,dd=0,wins=0,sum=0,valid=0;
 const curve=[{index:0,date:'Start',equity:100},...t.map((r,i)=>{
-const p=Number(r.netReturnPct);
+const p=typeof r.netReturnPct==='number'?r.netReturnPct:NaN;
 if(Number.isFinite(p)){valid++;sum+=p;wins+=Number(p>0);equity*=1+p/100;peak=Math.max(peak,equity);dd=Math.max(dd,(peak-equity)/peak*100);}
 return{index:i+1,date:String(r.date||''),equity:Number(equity.toFixed(3))};
 })];

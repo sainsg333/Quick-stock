@@ -12,7 +12,7 @@ if(f.type==='select')obj[f.key]=f.options?.[0]??'';
 else if(f.type==='tags'||f.type==='symbols')obj[f.key]=[];
 else if(f.type==='boolean')obj[f.key]=false;
 else if(f.type==='number')obj[f.key]=f.required?0:null;
-else if(f.type==='date')obj[f.key]=today();
+else if(f.type==='date')obj[f.key]=f.key==='observedAt'?'':today();
 else obj[f.key]='';
 });
 return obj;

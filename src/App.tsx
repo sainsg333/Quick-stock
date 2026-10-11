@@ -46,9 +46,9 @@ function StatCard({title,value,subtitle,icon:Icon}:{title:string;value:string;su
  <div className="mt-4 font-['Space_Grotesk'] text-[32px] font-bold tracking-[-.05em]">{value}</div><p className="mt-1 text-xs text-[#82999e]">{subtitle}</p></div>;
 }
 function Auth({mode,onDone}:{mode:'setup'|'login';onDone:()=>void}){
- const [pass,setPass]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const [pass,setPass]=useState(''),[setupToken,setSetupToken]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
  const submit=async(e:FormEvent)=>{e.preventDefault();setBusy(true);setError('');
- try{await request('/auth/'+mode,{method:'POST',body:JSON.stringify({password:pass})});onDone();}
+ try{await request('/auth/'+mode,{method:'POST',body:JSON.stringify(mode==='setup'?{password:pass,setupToken}:{password:pass})});onDone();}
  catch(err){setError(err instanceof Error?err.message:'Could not sign in');}
  finally{setBusy(false);}};
  return <div className="flex min-h-screen items-center justify-center bg-[#0a1217] p-5">
@@ -57,17 +57,19 @@ function Auth({mode,onDone}:{mode:'setup'|'login';onDone:()=>void}){
  <div className="mb-10 flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#b9ee79] text-[#122016]"><Activity size={26}/></div><div><div className="display text-xl font-bold tracking-tight">quickstocks<span className="text-[#b4f272]">.</span></div><p className="text-[11px] font-semibold uppercase tracking-[.2em] text-[#81959a]">Research workspace</p></div></div>
  <span className="eyebrow">{mode==='setup'?'Private workspace setup':'Welcome back'}</span>
  <h1 className="mt-2 text-3xl font-bold">{mode==='setup'?'Make it yours.':'Sign in to QuickStocks'}</h1>
- <p className="muted mt-3 text-sm leading-6">{mode==='setup'?'Choose a password (minimum 6 characters) for your private stock research workspace.':'Enter your workspace password to view your research and records.'}</p>
+ <p className="muted mt-3 text-sm leading-6">{mode==='setup'?'Enter your private setup token and choose a password (12+ characters). The token comes from your server settings.':'Enter your workspace password to view your research and records.'}</p>
  <form onSubmit={submit} className="mt-8 space-y-5">
- <div><label className="label">Workspace password</label><input className="input" type="password" autoComplete={mode==='setup'?'new-password':'current-password'} minLength={6} maxLength={128} required value={pass} onChange={e=>setPass(e.target.value)} placeholder="At least 6 characters"/></div>
+ <div><label className="label">Workspace password</label><input className="input" type="password" autoComplete={mode==='setup'?'new-password':'current-password'} minLength={mode==='setup'?12:6} maxLength={128} required value={pass} onChange={e=>setPass(e.target.value)} placeholder={mode==='setup'?'At least 12 characters':'Your password'}/></div>
+ {mode==='setup'&&<div><label className="label">Private setup token</label><input className="input" type="password" autoComplete="off" minLength={24} maxLength={256} required value={setupToken} onChange={e=>setSetupToken(e.target.value)} placeholder="SETUP_TOKEN from Vercel environment variables"/><p className="mt-2 text-xs text-[#8da0a5]">Only required for first-time owner registration. Keep this token private.</p></div>}
  {error&&<p role="alert" className="rounded-xl border border-red-700/40 bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}
- <button className="btn-primary w-full py-3.5" disabled={busy||pass.length<6} type="submit">{busy?'Please wait...':mode==='setup'?'Create workspace':'Sign in'}<ArrowRight size={18}/></button>
+ <button className="btn-primary w-full py-3.5" disabled={busy||pass.length<(mode==='setup'?12:6)||(mode==='setup'&&setupToken.length<24)} type="submit">{busy?'Please wait...':mode==='setup'?'Create workspace':'Sign in'}<ArrowRight size={18}/></button>
  </form>
  <div className="mt-8 flex items-start gap-2 border-t border-[#314046] pt-5 text-xs leading-5 text-[#8ea4a4]"><ShieldCheck size={17} className="shrink-0 text-[#b4f272]"/>Password protected, stored as a bcrypt hash. Sign-in uses an HttpOnly cookie. Your research stays in MongoDB.</div>
  </div></div>;
 }
 function Overview({data,onNavigate,onNew}:{data:Data;onNavigate:(p:Page)=>void;onNew:(k:Kind)=>void}){
- const m=useMemo(()=>tradeMetrics(data.trades),[data.trades]);
+ const [performanceSource,setPerformanceSource]=useState<'backtest'|'paper'|'live'>('backtest');
+  const m=useMemo(()=>tradeMetrics(data.trades.filter(x=>x.source===performanceSource)),[data.trades,performanceSource]);
  const sectors=useMemo(()=>sectorCounts(data.stocks),[data.stocks]);
  const supported=data.matches.filter(x=>x.verdict==='working'&&evidenceLevel(x)==='Evidence-backed*');
  const activity=[...kinds.flatMap(kind=>data[kind].map(x=>({...x,kind} as Row & {kind:Kind})))].sort((a,b)=>String(b.updatedAt||b.createdAt||'').localeCompare(String(a.updatedAt||a.createdAt||''))).slice(0,6);
@@ -86,10 +88,10 @@ function Overview({data,onNavigate,onNew}:{data:Data;onNavigate:(p:Page)=>void;o
  <StatCard title="Evidence-backed matches*" value={String(supported.length)} subtitle="Self-reported validation flags" icon={ShieldCheck}/>
  </div>
  <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.55fr_1fr]">
- <section className="surface overflow-hidden"><div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#293940] p-5 sm:p-6"><div><h3 className="text-lg font-bold">Recorded equity curve</h3><p className="muted mt-1 text-xs">Compounded net return from all logged trades, in date order; starting at 100</p></div><Badge value={m.count?m.count+' records':'No trade data'}/></div>
+ <section className="surface overflow-hidden"><div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#293940] p-5 sm:p-6"><div><h3 className="text-lg font-bold">Trade-index return simulation</h3><p className="muted mt-1 text-xs">Illustrative sequential compounding, starting at 100. Not a position-sized account equity curve.</p></div><div className="flex flex-wrap items-center gap-2"><select className="input w-auto min-w-32 capitalize" aria-label="Performance data source" value={performanceSource} onChange={e=>setPerformanceSource(e.target.value as 'backtest'|'paper'|'live')}><option value="backtest">Backtests</option><option value="paper">Paper trades</option><option value="live">Live trades</option></select><Badge value={m.count?m.count+' records':'No trade data'}/></div></div>
  {m.count?<><div className="grid grid-cols-2 gap-3 px-6 pt-5 md:grid-cols-4">
  {[['Trades',String(m.count)],['Win rate',fmt(m.winRate)+'%'],['Comp. return',fmt(m.returnPct)+'%'],['Max DD',fmt(m.maxDrawdown)+'%']].map(([k,v])=><div key={k}><div className="muted text-[11px]">{k}</div><div className="mt-1 text-lg font-bold">{v}</div></div>)}
- </div><div className="h-64 p-4"><ResponsiveContainer width="100%" height="100%"><LineChart data={m.curve}><CartesianGrid strokeDasharray="3 8" stroke="#2b3a41" vertical={false}/><XAxis dataKey="index" tickLine={false} axisLine={false} stroke="#83989f" fontSize={11}/><YAxis domain={['auto','auto']} tickLine={false} axisLine={false} stroke="#83989f" fontSize={11}/><Tooltip contentStyle={tooltipStyle}/><Line type="monotone" dataKey="equity" name="Equity index" stroke="#b4f272" strokeWidth={3} dot={false} activeDot={{r:5}}/></LineChart></ResponsiveContainer></div></>:<Empty title="Your performance chart starts here" subtitle="Log backtested, paper or live trade outcomes to see a genuine recorded equity curve." action={()=>onNew('trades')}/>}
+ </div><div className="h-64 p-4"><ResponsiveContainer width="100%" height="100%"><LineChart data={m.curve}><CartesianGrid strokeDasharray="3 8" stroke="#2b3a41" vertical={false}/><XAxis dataKey="index" tickLine={false} axisLine={false} stroke="#83989f" fontSize={11}/><YAxis domain={['auto','auto']} tickLine={false} axisLine={false} stroke="#83989f" fontSize={11}/><Tooltip contentStyle={tooltipStyle}/><Line type="monotone" dataKey="equity" name="Equity index" stroke="#b4f272" strokeWidth={3} dot={false} activeDot={{r:5}}/></LineChart></ResponsiveContainer></div></>:<Empty title="Your performance chart starts here" subtitle={'No '+performanceSource+' results recorded yet. Log results for this source or select another source above.'} action={()=>onNew('trades')}/>}
  </section>
  <section className="surface overflow-hidden"><div className="flex items-start justify-between gap-3 border-b border-[#293940] p-5 sm:p-6"><div><h3 className="text-lg font-bold">Sector coverage</h3><p className="muted mt-1 text-xs">Distribution of researched stocks</p></div><button className="btn-ghost" onClick={()=>onNavigate('stocks')}>View stocks <ArrowRight size={14}/></button></div>
  {sectors.length?<><div className="mx-auto h-48 w-full max-w-[320px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={sectors} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={54} outerRadius={78} stroke="none" paddingAngle={3}>{sectors.map((_,i)=><Cell key={i} fill={['#b4f272','#6ad3b0','#569ca4','#768fc8','#ba93d2','#d3a37e','#a0b7bc','#485c63'][i]}/>)}</Pie><Tooltip contentStyle={tooltipStyle}/></PieChart></ResponsiveContainer></div>
@@ -102,7 +104,7 @@ function Overview({data,onNavigate,onNew}:{data:Data;onNavigate:(p:Page)=>void;o
  <section className="surface overflow-hidden"><div className="flex items-center justify-between border-b border-[#293940] p-5 sm:p-6"><div><h3 className="text-lg font-bold">Recent research</h3><p className="muted mt-1 text-xs">Most recently updated records</p></div><Clock3 size={18} className="text-[#86a096]"/></div>
  {activity.length?<div className="divide-y divide-[#27383e] px-5">{activity.map(x=><button key={x.kind+':'+x.id} onClick={()=>onNavigate(x.kind)} className="flex w-full items-center justify-between gap-3 py-4 text-left hover:text-[#b4f272]"><div className="min-w-0"><p className="truncate text-sm font-semibold">{val(x.name||x.title||x.symbol||x.date)}</p><p className="mt-1 text-xs capitalize text-[#849aa1]">{config[x.kind].singular} · {x.updatedAt?new Date(String(x.updatedAt)).toLocaleDateString('en-IN'):''}</p></div><ArrowRight size={16} className="shrink-0"/></button>)}</div>:<Empty title="No activity recorded" subtitle="Add a stock, strategy, watchlist or journal entry to begin your research." action={()=>onNew('journal')}/>}
  </section></div>
- <div className="rounded-xl border border-[#38483d] bg-[#17241c] p-4 text-xs leading-6 text-[#b4c6b6]"><strong className="text-[#d2e3bf]">Research integrity:</strong> Evidence-backed* is a user-supplied classification requiring at least 30 samples and an out-of-sample checkbox; it does not prove profitability. No live quotes or automated exchange scanning are included. Backtests and live trades are aggregated together only for an overview — filter the trade log to inspect sources separately.</div>
+ <div className="rounded-xl border border-[#38483d] bg-[#17241c] p-4 text-xs leading-6 text-[#b4c6b6]"><strong className="text-[#d2e3bf]">Research integrity:</strong> Evidence-backed* is a user-supplied classification requiring at least 30 samples and an out-of-sample checkbox; it does not prove profitability. No live quotes or automated exchange scanning are included. Backtest, paper and live trade outcomes are displayed separately. Sequential compounding assumes one fully allocated trade at a time, so it is illustrative rather than actual portfolio equity.</div>
  </div>;
 }
 function Resource({kind,rows,strategies,onEdit,onNew,onDelete}:{kind:Kind;rows:Row[];strategies:Row[];onEdit:(r:Row)=>void;onNew:()=>void;onDelete:(r:Row)=>void}){
@@ -111,18 +113,20 @@ function Resource({kind,rows,strategies,onEdit,onNew,onDelete}:{kind:Kind;rows:R
  const filterKey=kind==='stocks'?'trend':kind==='strategies'?'style':kind==='matches'?'verdict':kind==='watchlists'?'focus':kind==='trades'?'source':'category';
  const filterValues=[...new Set(rows.map(r=>String(r[filterKey]||'')).filter(Boolean))].sort();
  const searched=useMemo(()=>rows.filter(row=>{
- const text=Object.values(row).map(v=>Array.isArray(v)?v.join(' '):typeof v==='object'?'':String(v||'')).join(' ').toLowerCase();
+ const linkedStrategy=String(strategies.find(s=>s.id===row.strategyId)?.name||'');
+  const text=(Object.values(row).map(v=>Array.isArray(v)?v.join(' '):typeof v==='object'?'':String(v||'')).join(' ')+' '+linkedStrategy).toLowerCase();
  return text.includes(q.toLowerCase())&&(filter==='all'||String(row[filterKey])===filter);
  }).sort((a,b)=>{
  if(sort==='az')return String(a.symbol||a.name||a.title||'').localeCompare(String(b.symbol||b.name||b.title||''));
  if(sort==='oldest')return String(a.createdAt||'').localeCompare(String(b.createdAt||''));
  if(sort==='performance')return Number(b.changePct??b.netReturnPct??b.winRate??-999)-Number(a.changePct??a.netReturnPct??a.winRate??-999);
  return String(b.updatedAt||b.createdAt||'').localeCompare(String(a.updatedAt||a.createdAt||''));
- }),[rows,q,filter,sort,filterKey]);
+ }),[rows,q,filter,sort,filterKey,strategies]);
  const pageSize=12,totalPages=Math.max(1,Math.ceil(searched.length/pageSize)),safePage=Math.min(page,totalPages),visible=searched.slice((safePage-1)*pageSize,safePage*pageSize);
  const display=(r:Row,key:string)=>{
  const v=r[key];
  if(key==='strategyId')return <span className="font-medium text-[#c5d4d6]">{String(strategies.find(x=>x.id===v)?.name||'Unlinked strategy')}</span>;
+ if(key==='screenshotUrl')return typeof v==='string'&&/^https?:\/\//i.test(v)?<a href={v} target="_blank" rel="noopener noreferrer" className="font-semibold text-[#b4f272] underline underline-offset-4 hover:text-white">View screenshot ↗</a>:<span className="muted">—</span>;
  if(key==='symbol')return <span className="font-['Space_Grotesk'] font-bold text-[#d7f0ba]">{val(v)}</span>;
  if(key==='changePct'||key==='netReturnPct'||key==='avgReturnPct')return <NumberBadge n={v}/>;
  if(key==='rvol')return v===null||v===undefined?'—':fmt(Number(v),2)+'×';
@@ -151,7 +155,7 @@ function Resource({kind,rows,strategies,onEdit,onNew,onDelete}:{kind:Kind;rows:R
  </tr>)}</tbody></table></div>}
  {searched.length>pageSize&&<div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#293940] px-5 py-4"><p className="muted text-xs">Page {safePage} of {totalPages}</p><div className="flex gap-2"><button className="btn-secondary" disabled={safePage===1} onClick={()=>setPage(p=>p-1)}><ChevronLeft size={15}/> Previous</button><button className="btn-secondary" disabled={safePage===totalPages} onClick={()=>setPage(p=>p+1)}>Next <ChevronRight size={15}/></button></div></div>}
  </section>
- {kind==='stocks'&&<div className="surface-soft flex gap-3 p-5"><Clock3 className="shrink-0 text-[#b4f272]" size={19}/><p className="text-xs leading-6 text-[#abc0bb]"><strong>Prices are saved snapshots.</strong> Change %, RVOL and RSI are not synced to the exchange. Use the date and notes fields to document when figures were observed.</p></div>}
+ {kind==='stocks'&&<div className="surface-soft flex gap-3 p-5"><Clock3 className="shrink-0 text-[#b4f272]" size={19}/><p className="text-xs leading-6 text-[#abc0bb]"><strong>Prices are saved snapshots.</strong> Change %, RVOL and RSI are not synced to the exchange. Use the Snapshot date field to document when figures were observed.</p></div>}
  {kind==='matches'&&<div className="surface-soft flex gap-3 p-5"><FlaskConical className="shrink-0 text-[#b4f272]" size={19}/><p className="text-xs leading-6 text-[#abc0bb]">A “working” verdict is your conclusion, not a verified result. Record sample size, market regime and out-of-sample evidence before relying on a pattern.</p></div>}
  </div>;
 }
@@ -197,6 +201,6 @@ export default function App(){
  <footer className="mt-12 flex flex-wrap justify-between gap-3 border-t border-[#26383e] pt-6 text-xs text-[#728c90]"><span>QuickStocks © 2026 · Built for disciplined market research</span><span>Personal records only · Not investment advice</span></footer>
  </div></main>
  {editor&&<Editor key={editor.kind+(editor.row?.id||'new')} kind={editor.kind} row={editor.row} stocks={data.stocks} strategies={data.strategies} onClose={()=>setEditor(null)} onSaved={saved}/>}
- {confirm&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" role="dialog" aria-modal="true"><div className="surface w-full max-w-md p-7"><div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-red-500/15 text-red-300"><Trash2 size={22}/></div><h2 className="text-xl font-bold">Delete {config[confirm.kind].singular}?</h2><p className="muted mt-3 text-sm leading-6">This record will be permanently deleted. Related strategy mappings are not automatically removed, so check for orphaned references afterward.</p><div className="mt-7 flex justify-end gap-3"><button className="btn-secondary" onClick={()=>setConfirm(null)} disabled={deleting}>Cancel</button><button className="rounded-xl bg-[#ad514a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#c96158] disabled:opacity-50" onClick={deleteRecord} disabled={deleting}>{deleting?'Deleting...':'Delete record'}</button></div></div></div>}
+ {confirm&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" role="dialog" aria-modal="true"><div className="surface w-full max-w-md p-7"><div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-red-500/15 text-red-300"><Trash2 size={22}/></div><h2 className="text-xl font-bold">Delete {config[confirm.kind].singular}?</h2><p className="muted mt-3 text-sm leading-6">This record will be permanently deleted. Linked strategy matches, trades, journal notes or watchlists must be updated before referenced records can be removed.</p><div className="mt-7 flex justify-end gap-3"><button className="btn-secondary" onClick={()=>setConfirm(null)} disabled={deleting}>Cancel</button><button className="rounded-xl bg-[#ad514a] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#c96158] disabled:opacity-50" onClick={deleteRecord} disabled={deleting}>{deleting?'Deleting...':'Delete record'}</button></div></div></div>}
  </div>;
 }
