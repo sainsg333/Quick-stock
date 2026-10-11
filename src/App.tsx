@@ -70,7 +70,7 @@ function Overview({data,onNavigate,onNew}:{data:Data;onNavigate:(p:Page)=>void;o
  const m=useMemo(()=>tradeMetrics(data.trades),[data.trades]);
  const sectors=useMemo(()=>sectorCounts(data.stocks),[data.stocks]);
  const supported=data.matches.filter(x=>x.verdict==='working'&&evidenceLevel(x)==='Evidence-backed*');
- const activity=[...kinds.flatMap(kind=>data[kind].map(x=>({...x,kind})))].sort((a,b)=>String(b.updatedAt||b.createdAt||'').localeCompare(String(a.updatedAt||a.createdAt||''))).slice(0,6);
+ const activity=[...kinds.flatMap(kind=>data[kind].map(x=>({...x,kind} as Row & {kind:Kind})))].sort((a,b)=>String(b.updatedAt||b.createdAt||'').localeCompare(String(a.updatedAt||a.createdAt||''))).slice(0,6);
  const tooltipStyle={background:'#17262b',border:'1px solid #405158',borderRadius:12,color:'#e7f3ef'};
  return <div className="space-y-7 animate-up">
  <div className="rounded-2xl border border-[#4a623d] bg-[linear-gradient(110deg,#1e3529_0%,#182822_50%,#142127_100%)] px-6 py-7 sm:px-9">
