@@ -1,0 +1,22 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+:root{font-family:'DM Sans',sans-serif;color:#e9f1f0;background:#0a1217;font-synthesis:none;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}body{margin:0;min-width:320px}button,input,textarea,select{font:inherit}button{cursor:pointer}
+h1,h2,h3,.display{font-family:'Space Grotesk',sans-serif}
+::selection{background:#b4f272;color:#0a1217}::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#334449;border-radius:20px}
+@layer components{
+.surface{@apply rounded-2xl border border-[#26363e] bg-[#121f25] shadow-panel}
+.surface-soft{@apply rounded-2xl border border-[#25343a] bg-[#101a20]}
+.muted{@apply text-[#8da0a5]}
+.label{@apply block mb-2 text-xs font-semibold tracking-wide text-[#b2c0c2]}
+.input{@apply w-full rounded-xl border border-[#334249] bg-[#0b171c] px-3.5 py-3 text-sm text-[#ecf4f1] outline-none transition placeholder:text-[#61767d] focus:border-[#b4f272] focus:ring-1 focus:ring-[#b4f272]/20}
+.btn-primary{@apply inline-flex items-center justify-center gap-2 rounded-xl bg-[#b9ee79] px-4 py-2.5 text-sm font-bold text-[#112017] transition hover:bg-[#d1ffa1] disabled:cursor-not-allowed disabled:opacity-40}
+.btn-secondary{@apply inline-flex items-center justify-center gap-2 rounded-xl border border-[#32444b] bg-[#1b2a30] px-4 py-2.5 text-sm font-semibold text-[#e4edea] transition hover:border-[#79917e] hover:bg-[#24363d] disabled:opacity-40}
+.btn-ghost{@apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm text-[#b5c4c6] transition hover:bg-[#26363c] hover:text-white}
+.eyebrow{@apply text-[11px] font-bold uppercase tracking-[.18em] text-[#b4f272]}
+.table-header{@apply whitespace-nowrap border-b border-[#2b3d43] px-4 py-3.5 text-left text-[11px] font-bold uppercase tracking-[.11em] text-[#81979c]}
+.table-cell{@apply border-b border-[#223039] px-4 py-4 text-sm}
+}
+@keyframes up{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}.animate-up{animation:up .3s ease-out both}
